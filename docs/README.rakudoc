@@ -1,0 +1,159 @@
+=begin rakudoc :type<fundamental>
+=TITLE RakuDoc renderer inside a container
+
+=SUBTITLE Renders RakuDoc sources into HTML and returns HTML
+=for AUTHOR :hidden
+Richard Hainsworth aka finanalyst
+
+=for VERSION :hidden
+v0.1.0
+
+=head Overview
+
+Repo for the creation of a docker container with Cro.
+
+Maintained as C<docker.io/finanalyst/rakuast-render-websocket>
+
+Intended to render a RakuDoc source payload delivered via a websocket into
+a single file HTML (all assets and in HTML text), and return via same
+websocket.
+
+=head Websocket
+
+The websocket name is C<rakudoc_render>.
+
+Assuming an incoming json payload with one of two keys:
+=numdefn source
+Valid RakuDoc source
+
+=numdefn loaded
+A boolean requesting a handshake to indicate the websocket is established
+
+Then a json payload is returned. If B<loaded> was sent,
+=defn connection
+Value is 'Confirmed' and websocket is established.
+
+If B<source> was sent,
+=defn html
+The C<single-file> HTML rendering as defined for RenderDocs in the
+Rakuast-RakuDoc-Render distribution
+
+=defn err
+Any errors as an HTML div
+
+=head Generating the Image
+
+The DockerFile will generate an image based on the Alpine image, compile Rakudo, zef, Cro, and Rakuast::RakuDoc::Render
+and run the Cro service.
+
+The image can be obtained with
+```
+sudo docker pull docker.io/finanalyst/rakudoc-render-socket:latest
+```
+
+=head Running the container
+
+In the server, after the docker pull
+```
+sudo docker run --rm -d -p 50005:50005 docker.io/finanalyst/rakudoc-render-socket:latest
+```
+
+=head Example inside browser
+
+Once the container is running, the following bare (no CSS) HTML page will push Rakudoc source to the container.
+
+=begin code :lang<html>
+<html>
+    <head>
+        <title>Test</title>
+        <script>
+            var websocketHost = "some-domain-where-container-is-running.org";
+            var preview;
+            var socketIndicator;
+            // credit: This javascript file is adapted from
+            // https://fjolt.com/article/javascript-websockets
+            // Connect to the websocket
+            var socket;
+            // This will let us create a connection to our Server websocket.
+            const connect = function() {
+                // Return a promise, which will wait for the socket to open
+                return new Promise((resolve, reject) => {
+                    // This calculates the link to the websocket.
+                    const socketUrl = `wss://${websocketHost}/rakudoc_render`;
+                    socket = new WebSocket(socketUrl);
+
+                    // This will fire once the socket opens
+                    socket.onopen = (e) => {
+                        // Send a little test data, which we can use on the server if we want
+                        socket.send(JSON.stringify({ "loaded" : true }));
+                        // Resolve the promise - we are connected
+                        resolve();
+                    }
+
+                    // This will fire when the server sends the user a message
+                    socket.onmessage = (data) => {
+                        let parsedData = JSON.parse(data.data);
+                        if (parsedData.connection == 'Confirmed') {
+                            socketIndicator.dataset.openchannel = 'on';
+                        }
+                        else {
+                            preview.srcdoc = parsedData.html;
+                        }
+                    }
+                    // This will fire on error
+                    socket.onerror = (e) => {
+                        // Return an error if any occurs
+                        console.log(e);
+                        socketIndicator.dataset.openchannel = 'off';
+                        resolve();
+                        // Try to connect again
+                        connect();
+                    }
+                });
+            }
+
+            // @isOpen
+            // check if a websocket is open
+            const isOpen = function(ws) {
+                return ws.readyState === ws.OPEN
+            }
+            function sendSource() {
+                let source = content.innerText;
+                if(isOpen(socket)) {
+                    socket.send(JSON.stringify({
+                        "source" : source
+                    }))
+                }
+            }
+            document.addEventListener('DOMContentLoaded', function () {
+                content = document.getElementById('initContent');
+                preview = document.getElementById('preview');
+                renderContent = document.getElementById('getHTML');
+                socketIndicator = document.getElementById('socketIndicator');
+                connect();
+                sendSource();
+                renderContent.addEventListener('click', () => {
+                    sendSource();
+                });
+            });
+        </script>
+    </head>
+    <body>
+        <button id="getHTML">Render Source</button>
+        <div data-openchanel="off">Render Server</div>
+        <iframe id="preview"></iframe>
+        <div id="initContent">=begin rakudoc
+=head A heading
+
+Some text
+=end rakudoc
+        </div>
+    </body>
+</html>
+=end code
+
+=place semantic:AUTHOR :caption<Credits>
+
+=place semantic:VERSION :!toc
+
+=end rakudoc
